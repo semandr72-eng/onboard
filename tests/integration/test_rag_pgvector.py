@@ -33,7 +33,8 @@ document_type: Регламент
 
 
 def _docker(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["docker", *args], capture_output=True, text=True, timeout=120)
+    # Таймаут с запасом: первый запуск может включать скачивание образа (~650 МБ).
+    return subprocess.run(["docker", *args], capture_output=True, text=True, timeout=300)
 
 
 @pytest.fixture
@@ -42,29 +43,31 @@ async def pgvector_url():
         pytest.skip("docker не установлен")
 
     name = f"onboard-pgvector-test-{uuid.uuid4().hex[:8]}"
-    started = _docker(
-        "run", "-d", "--rm", "--name", name,
-        "-e", "POSTGRES_DB=onboarding",
-        "-e", "POSTGRES_USER=postgres",
-        "-e", "POSTGRES_PASSWORD=postgres",
-        "-p", f"{CONTAINER_PORT}:5432",
-        IMAGE,
-    )
-    if started.returncode != 0:
-        pytest.skip(f"не удалось поднять контейнер pgvector: {started.stderr.strip()}")
-
-    url = f"postgresql+asyncpg://postgres:postgres@localhost:{CONTAINER_PORT}/onboarding"
     try:
-        for _ in range(30):
+        started = _docker(
+            "run", "-d", "--rm", "--name", name,
+            "-e", "POSTGRES_DB=onboarding",
+            "-e", "POSTGRES_USER=postgres",
+            "-e", "POSTGRES_PASSWORD=postgres",
+            "-p", f"{CONTAINER_PORT}:5432",
+            IMAGE,
+        )
+        if started.returncode != 0:
+            pytest.skip(f"не удалось поднять контейнер pgvector: {started.stderr.strip()}")
+
+        url = f"postgresql+asyncpg://postgres:postgres@localhost:{CONTAINER_PORT}/onboarding"
+        for _ in range(60):
             ready = _docker("exec", name, "pg_isready", "-U", "postgres", "-d", "onboarding")
             if ready.returncode == 0:
                 break
-            time.sleep(1)
+            time.sleep(2)
         else:
-            pytest.skip("postgres в контейнере не стал готов за 30 секунд")
+            pytest.skip("postgres в контейнере не стал готов за отведённое время")
 
         await asyncio.to_thread(run_migrations, url)
         yield url
+    except (OSError, subprocess.SubprocessError) as exc:
+        pytest.skip(f"docker недоступен в этом окружении: {exc}")
     finally:
         _docker("rm", "-f", name)
 
