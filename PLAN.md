@@ -66,3 +66,5 @@
 - Бот: `python main.py` (требует валидный `BOT_TOKEN` в `.env`).
 - venv на Python 3.11 (`.venv`), в `requirements.txt` добавлен экстра `[asyncio]` у SQLAlchemy (нужен `greenlet`).
 - `docker compose up --build` сейчас не работает: Docker Desktop не достаёт до Docker Hub (обход — локальный запуск, образ БД уже в кэше).
+- Репозиторий опубликован: https://github.com/semandr72-eng/onboard (CI зелёный: ruff + mypy + 47 тестов на каждый push).
+- Этап 6 закрыт; следующий шаг — финальная статья (RU-черновик в `ARTICLE_RU.md`, нужны цифры пилота и EN-версия).
