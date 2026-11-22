@@ -317,12 +317,19 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
         wants_next = payload.text.strip() == "/next_section" and web_session.draft.phase == "learning"
         if wants_next and titles:
             covered_count = len(web_session.draft.covered_sections)
-            if covered_count < len(titles):
-                web_session.draft = training_service.mark_section_covered(
-                    web_session.draft, titles[covered_count]
-                )
-                covered_count += 1
             display_text = "Понятно 👌"
+            if covered_count >= len(titles):
+                # Все разделы уже пройдены: без обращения к ИИ — сразу отправляем к тесту.
+                turn = TrainingAssistantTurn(
+                    reply="Все разделы уже пройдены ✅ Жми «Начать тест» 🚀",
+                    phase="learning",
+                )
+                web_session.draft = training_service.apply_ai_turn(web_session.draft, turn)
+                return await _apply_turn(web_session, turn, display_text)
+            web_session.draft = training_service.mark_section_covered(
+                web_session.draft, titles[covered_count]
+            )
+            covered_count += 1
             if covered_count >= len(titles):
                 llm_text = (
                     "[служебная пометка: сотрудник нажал «Понятно». Все разделы пройдены. "

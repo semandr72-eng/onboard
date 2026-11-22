@@ -348,9 +348,14 @@ async def _continue_learning(
     wants_next = user_text.strip() == NEXT_SECTION_TEXT and draft.phase == "learning" and bool(titles)
     if wants_next:
         covered_count = len(draft.covered_sections)
-        if covered_count < len(titles):
-            draft = training_service.mark_section_covered(draft, titles[covered_count])
-            covered_count += 1
+        if covered_count >= len(titles):
+            await message.answer(
+                "Все разделы уже пройдены ✅ Отправь /test, чтобы начать тестирование.",
+                reply_markup=learning_keyboard(),
+            )
+            return
+        draft = training_service.mark_section_covered(draft, titles[covered_count])
+        covered_count += 1
         if covered_count >= len(titles):
             llm_text = (
                 "[служебная пометка: сотрудник нажал «Понятно». Все разделы пройдены. "

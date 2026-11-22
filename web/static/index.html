@@ -396,16 +396,20 @@ function renderLearnActions(visible) {
     bar.classList.add("hidden");
     return;
   }
+  const coverage = (lastState && lastState.coverage) || { covered: 0, total: 0 };
+  const allDone = coverage.total > 0 && coverage.covered >= coverage.total;
   const ask = document.createElement("button");
   ask.className = "secondary";
   ask.textContent = "💬 Задать вопрос";
   ask.onclick = () => document.getElementById("message-input").focus();
   bar.appendChild(ask);
-  const next = document.createElement("button");
-  next.className = "next-section";
-  next.textContent = "Понятно, дальше →";
-  next.onclick = () => sendMessage("/next_section");
-  bar.appendChild(next);
+  if (!allDone) {
+    const next = document.createElement("button");
+    next.className = "next-section";
+    next.textContent = "Понятно, дальше →";
+    next.onclick = () => sendMessage("/next_section");
+    bar.appendChild(next);
+  }
   bar.classList.remove("hidden");
 }
 
