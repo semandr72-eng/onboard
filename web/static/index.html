@@ -374,6 +374,7 @@ function updateProgress(draft) {
     badge.classList.add("testing");
     wrap.style.display = "flex";
     testBtn.classList.add("hidden");
+    document.getElementById("message-input").placeholder = "Напиши ответ на вопрос…";
     const pct = draft.total_questions ? Math.round(draft.questions_answered / draft.total_questions * 100) : 0;
     document.getElementById("progress-bar").style.width = pct + "%";
     document.getElementById("progress-label").textContent = pct + "%";
@@ -382,6 +383,7 @@ function updateProgress(draft) {
       ? "🎓 Обучение · раздел " + Math.min(coverage.covered, coverage.total) + " из " + coverage.total
       : "🎓 Обучение";
     wrap.style.display = "none";
+    document.getElementById("message-input").placeholder = "Напиши ответ или задай вопрос…";
     testBtn.disabled = !curriculumDone;
     testBtn.textContent = curriculumDone
       ? "🚀 Я всё изучил — начать тест"
