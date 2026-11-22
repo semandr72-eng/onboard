@@ -32,6 +32,7 @@ from services import (
     RAGService,
     TrainingService,
 )
+from services.moderation import Moderator
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,9 @@ HISTORY_LIMIT = 12  # сообщений (6 реплик наставника + 
 FIRST_MESSAGE_TEXT = (
     "Привет! 👋 Давай изучим регламент по шагам: 1) начало смены и получение заказа, "
     "2) поиск товаров и замены, 3) упаковка и температурный режим, 4) завершение сборки. "
-    "Объясняй простыми словами, приводи примеры и задавай мне проверочные вопросы по ходу, "
-    "чтобы убедиться, что я понимаю. Когда скажу, что всё ясно — предложи разобрать что-то ещё "
-    "или дождись, пока я нажму кнопку «Начать тест». Сам тест пока не начинай."
+    "Разбирай разделы строго по порядку, простыми словами, с примерами. После объяснения "
+    "каждого раздела задавай мне один короткий вопрос с 2–4 вариантами ответов — я отвечу кликом. "
+    "Если у меня вопрос — я задам его текстом. Сам тест не начинай, пока я не нажму кнопку «Начать тест»."
 )
 
 
@@ -124,6 +125,7 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
     )
     training_service = TrainingService()
     consent_service = ConsentService(notice_version=settings.privacy_notice_version)
+    moderator = Moderator()
 
     from web.sessions import WebSessionStore
 
@@ -275,6 +277,16 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
         if web_session.state != "active":
             raise HTTPException(status_code=409, detail="Сессия обучения не активна.")
 
+        if not moderator.is_clean(payload.text):
+            async with session_factory() as session_db:
+                await AuditLogRepository(session_db).create(
+                    action="moderation.warn",
+                    status="warn",
+                    subject_id=web_session.subject_id,
+                    meta={"channel": "web", "direction": "in"},
+                )
+            raise HTTPException(status_code=409, detail="Давай без грубостей 🙂 Вернёмся к регламенту.")
+
         wants_test = payload.text.strip() == "/start_test"
         if wants_test and not await ai_training_service.is_curriculum_complete(web_session.draft):
             covered, total = await ai_training_service.curriculum_status(web_session.draft)
@@ -304,6 +316,19 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
                 status_code=502,
                 detail="ИИ-наставник временно недоступен. Попробуйте ещё раз или обратитесь к HR.",
             ) from exc
+
+        if not moderator.is_clean(turn.reply):
+            async with session_factory() as session_db:
+                await AuditLogRepository(session_db).create(
+                    action="moderation.warn",
+                    status="warn",
+                    subject_id=web_session.subject_id,
+                    meta={"channel": "web", "direction": "out"},
+                )
+            turn = turn.model_copy(
+                update={"reply": "Извини, не могу ответить в таком тоне. Давай вернёмся к регламенту 🙂"}
+            )
+
         web_session.draft = training_service.apply_ai_turn(web_session.draft, turn)
         return await _apply_turn(web_session, turn, payload.text)
 
@@ -317,6 +342,7 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
             "answer_feedback": turn.answer_feedback,
             "next_question": turn.next_question,
             "final_summary": turn.final_summary,
+            "quiz": turn.quiz.model_dump() if turn.quiz else None,
         }
         if turn.phase == "completed":
             await persist_result(web_session)

@@ -132,8 +132,17 @@ class AITrainingService:
                 messages=messages,
                 json_schema=AI_TRAINING_RESPONSE_SCHEMA,
             )
-            turn = TrainingAssistantTurn.model_validate(response.payload)
+            payload = self._sanitize_payload(response.payload)
+            turn = TrainingAssistantTurn.model_validate(payload)
             turn.section_completed = self._match_section(turn.section_completed, sections)
+            if (
+                sections
+                and draft.phase == "learning"
+                and turn.phase == "learning"
+                and turn.quiz is None
+                and (is_new_dialogue or turn.section_completed)
+            ):
+                turn = await self._repair_quiz(messages, turn)
         except Exception as exc:
             await self._write_audit(
                 subject_id=subject_id,
@@ -250,6 +259,48 @@ class AITrainingService:
             )
         except Exception:
             logger.exception("Failed to write audit record")
+
+    @staticmethod
+    def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        """Отбрасывает некорректный quiz (меньше 2 вариантов), чтобы не ломать весь ход.
+
+        Pydantic-модель требует минимум 2 варианта; если модель вернула меньше —
+        quiz игнорируем, механизм ремонта при необходимости запросит вопрос заново.
+        """
+        quiz = payload.get("quiz")
+        if isinstance(quiz, dict) and len(quiz.get("options") or []) < 2:
+            payload = {**payload, "quiz": None}
+        return payload
+
+    async def _repair_quiz(self, messages: list[dict[str, str]], turn: TrainingAssistantTurn) -> TrainingAssistantTurn:
+        """Маршрут: после объяснения раздела модель обязана задать вопрос с вариантами ответа.
+
+        Если модель забыла quiz — один повторный запрос с жёсткой инструкцией.
+        """
+        try:
+            response = await self._llm.generate_json(
+                messages=[
+                    *messages,
+                    {"role": "assistant", "content": json.dumps(turn.model_dump(), ensure_ascii=False)},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Ты объяснил раздел, но не заполнил quiz. Сейчас задай один короткий вопрос "
+                            "по этому разделу с 2–4 вариантами ответов: заполни quiz.question и quiz.options "
+                            "(верный вариант не помечай). В reply напиши сам вопрос одной строкой."
+                        ),
+                    },
+                ],
+                json_schema=AI_TRAINING_RESPONSE_SCHEMA,
+            )
+            repair = TrainingAssistantTurn.model_validate(response.payload)
+        except Exception:
+            logger.exception("Quiz repair failed")
+            return turn
+        if not repair.quiz:
+            return turn
+        reply = turn.reply if not repair.reply else f"{turn.reply}\n\n{repair.reply}"
+        return turn.model_copy(update={"quiz": repair.quiz, "reply": reply})
 
     async def section_titles(self) -> list[str]:
         """Названия разделов маршрута обучения (пусто — свободный режим без маршрута)."""

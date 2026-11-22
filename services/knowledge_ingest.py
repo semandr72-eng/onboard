@@ -8,6 +8,8 @@ CHUNK_MARKER_RE = re.compile(r"^#\s*ЧАНК\s+\d+[^\n]*$", re.MULTILINE)
 HEADING_RE = re.compile(r"^##\s+.+$", re.MULTILINE)
 REFERENCE_RE = re.compile(r"\[reference:\d+\]")
 SEPARATOR_RE = re.compile(r"^\s*---\s*$", re.MULTILINE)
+# Служебный префикс маркера («ЧАНК 2.») не показываем пользователям — только название раздела.
+CHUNK_PREFIX_RE = re.compile(r"^чанк\s+\d+\s*[.):]?\s*", re.IGNORECASE)
 
 
 @dataclass
@@ -34,7 +36,9 @@ def _split_by_markers(body: str, marker_re: re.Pattern) -> list[ChunkDraft]:
     for index, marker in enumerate(markers):
         start = marker.end()
         end = markers[index + 1].start() if index + 1 < len(markers) else len(body)
-        title = marker.group(0).lstrip("#").strip()
+        title = CHUNK_PREFIX_RE.sub("", marker.group(0).lstrip("#").strip()).strip()
+        if not title:
+            title = marker.group(0).lstrip("#").strip()
         content = _clean(body[start:end])
         if content:
             chunks.append(ChunkDraft(title=title, content=f"{title}\n\n{content}"))

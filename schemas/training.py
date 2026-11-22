@@ -18,6 +18,20 @@ class ChatMessage(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
 
 
+class Quiz(BaseModel):
+    """Контрольный вопрос по разделу с вариантами ответа (сотрудник отвечает кликом по кнопке)."""
+
+    question: str = Field(min_length=1, max_length=500)
+    options: list[str] = Field(min_length=2, max_length=4)
+
+    @field_validator("question", "options")
+    @classmethod
+    def normalize(cls, value):
+        if isinstance(value, str):
+            return _normalize_text(value)
+        return [_normalize_text(item) or "" for item in value]
+
+
 class EvaluatedAnswer(BaseModel):
     """Оцененный ответ на вопрос теста. Копится в черновике сессии, сохраняется вместе с результатом."""
 
@@ -90,6 +104,8 @@ class TrainingAssistantTurn(BaseModel):
     answer_feedback: str | None = None
     next_question: str | None = None
     final_summary: str | None = None
+    # Заполняется моделью в обучении: контрольный вопрос по разделу с вариантами ответа (иначе null).
+    quiz: Quiz | None = None
     # Заполняется моделью: точное название раздела, который только что завершён (иначе null).
     section_completed: str | None = None
     # Заполняется сервисом (не моделью): к какому чанку базы знаний отнесен оцененный вопрос.

@@ -1,6 +1,8 @@
 import pytest
+from pydantic import ValidationError
 
 from schemas import TrainingAssistantTurn, TrainingSessionDraft
+from schemas.training import Quiz
 from services.training_service import TrainingService
 
 
@@ -128,3 +130,21 @@ def test_apply_ai_turn_deduplicates_completed_sections():
         turn,
     )
     assert draft.covered_sections == ["ЧАНК 1. Смена"]
+
+
+def test_quiz_validates_options_count():
+    quiz = Quiz(question="Куда кладём заморозку?", options=["В термопакет", "В подсобку"])
+    assert quiz.options == ["В термопакет", "В подсобку"]
+
+    with pytest.raises(ValidationError):
+        Quiz(question="Куда?", options=["Только один вариант"])
+
+    turn = _turn(
+        phase="learning",
+        latest_answer_evaluated=False,
+        answer_is_correct=None,
+        next_question=None,
+        quiz={"question": "Куда кладём заморозку?", "options": ["В термопакет", "В подсобку"]},
+    )
+    assert turn.quiz is not None
+    assert turn.quiz.question == "Куда кладём заморозку?"

@@ -32,11 +32,18 @@ def test_frontmatter_metadata_parsed():
     assert parsed.metadata == {"document_type": "Регламент", "role": "Сборщик заказов", "version": "2.1"}
 
 
+def test_chunk_prefix_not_in_title():
+    """Служебный префикс «ЧАНК N.» не должен доходить до пользователя."""
+    parsed = parse_document(DOC_WITH_MARKERS)
+    assert parsed.chunks[0].title == "Температурный режим"
+    assert "ЧАНК" not in parsed.chunks[0].title
+
+
 def test_chunk_markers_split_and_title_included():
     parsed = parse_document(DOC_WITH_MARKERS)
     assert len(parsed.chunks) == 2
     first = parsed.chunks[0]
-    assert first.title == "ЧАНК 1. Температурный режим"
+    assert first.title == "Температурный режим"
     assert "Температурный режим" in first.content
     assert "20 минут" in first.content
     # Служебные [reference:N] вычищены.

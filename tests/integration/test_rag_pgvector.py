@@ -90,8 +90,8 @@ async def test_hybrid_search_over_pgvector(pgvector_url, fixed_embedder):
     hits = await rag.retrieve("заморозка", top_k=2)
     assert len(hits) == 2
     titles = {hit.title for hit in hits}
-    assert "ЧАНК 1. Температурный режим" in titles
-    assert "ЧАНК 2. Упаковка" in titles
+    assert "Температурный режим" in titles
+    assert "Упаковка" in titles
 
     # Семантическая атрибуция вопроса к чанку (для аналитики пробелов).
     chunk_title = await rag.attribute_chunk("Куда упаковывать бытовую химию?")

@@ -35,3 +35,12 @@ def confirm_delete_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Отмена", callback_data="delete:cancel")],
         ]
     )
+
+
+def quiz_keyboard(options: list[str]) -> InlineKeyboardMarkup:
+    """Варианты ответа на вопрос раздела: один клик вместо ввода текста."""
+    rows = [
+        [InlineKeyboardButton(text=option[:60], callback_data=f"quiz:{index}")]
+        for index, option in enumerate(options[:4])
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)

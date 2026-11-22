@@ -8,14 +8,16 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.keyboards import cancel_keyboard, confirm_delete_keyboard, consent_keyboard, remove_keyboard
+from bot.keyboards import cancel_keyboard, confirm_delete_keyboard, consent_keyboard, quiz_keyboard, remove_keyboard
 from config import Settings
 from database import AuditLogRepository, ConsentRepository, TrainingAnswerRepository, TrainingResultRepository
-from schemas import ChatMessage, TrainingSessionDraft
+from schemas import ChatMessage, TrainingAssistantTurn, TrainingSessionDraft
 from services import AITrainingService, ConsentService, PersonalDataService, TrainingService
+from services.moderation import Moderator
 
 logger = logging.getLogger(__name__)
 router = Router()
+moderator = Moderator()
 
 
 class TrainingStates(StatesGroup):
@@ -271,67 +273,117 @@ async def process_ai_training(
     raw_history = state_data.get("history", [])
     history = [ChatMessage.model_validate(item) for item in raw_history]
 
-    try:
-        if not name_collected:
+    if not name_collected:
+        try:
             updated_draft = training_service.register_employee_name(draft=draft, employee_name=user_text)
-            await state.update_data(draft=updated_draft.model_dump(), name_collected=True)
-            first_message = (
-                "Привет! 👋 Давай изучим регламент по шагам: 1) начало смены и получение заказа, "
-                "2) поиск товаров и замены, 3) упаковка и температурный режим, 4) завершение сборки. "
-                "Объясняй простыми словами, приводи примеры и задавай мне проверочные вопросы по ходу, "
-                "чтобы убедиться, что я понимаю. Когда скажу, что всё ясно — предложи разобрать что-то ещё "
-                "или дождись, пока я нажму кнопку «Начать тест». Сам тест пока не начинай."
-            )
-            ai_turn = await ai_training_service.generate_turn(
-                draft=updated_draft,
-                user_message=first_message,
-                is_new_dialogue=True,
-                subject_id=subject_id,
-                history=history,
-            )
-            updated_draft = training_service.apply_ai_turn(updated_draft, ai_turn)
-            await state.update_data(draft=updated_draft.model_dump())
-            history.append(ChatMessage(role="user", content=first_message))
-        else:
-            ai_turn = await ai_training_service.generate_turn(
-                draft=draft,
-                user_message=user_text,
-                is_new_dialogue=False,
-                subject_id=subject_id,
-                history=history,
-            )
-            updated_draft = training_service.apply_ai_turn(draft, ai_turn)
-            await state.update_data(draft=updated_draft.model_dump())
-            history.append(ChatMessage(role="user", content=user_text))
-
-        history.append(ChatMessage(role="assistant", content=ai_turn.reply))
-        if len(history) > 12:
-            history = history[-12:]
-        await state.update_data(history=[item.model_dump() for item in history])
-
-        if ai_turn.phase == "completed":
-            async with session_factory() as session:
-                repository = TrainingResultRepository(session)
-                await training_service.create_result(
-                    repository=repository,
-                    draft=updated_draft,
-                    topic=settings.training_topic,
-                    subject_id=subject_id or "tg:unknown",
-                    channel="telegram",
-                    answer_repository=TrainingAnswerRepository(session),
-                )
-
-            await state.clear()
-            await message.answer(
-                f"{ai_turn.reply}\n\n"
-                f"Результат сохранен в Postgres.\n"
-                f"Итог: {updated_draft.correct_answers}/{updated_draft.total_questions} "
-                f"({updated_draft.score_percent()}%).",
-                reply_markup=remove_keyboard(),
-            )
+        except ValueError as exc:
+            await message.answer(str(exc), reply_markup=cancel_keyboard())
             return
+        await state.update_data(draft=updated_draft.model_dump(), name_collected=True)
+        first_message = (
+            "Привет! 👋 Давай изучим регламент по шагам: 1) начало смены и получение заказа, "
+            "2) поиск товаров и замены, 3) упаковка и температурный режим, 4) завершение сборки. "
+            "Разбирай разделы строго по порядку, простыми словами, с примерами. После объяснения "
+            "каждого раздела задавай мне один короткий вопрос с 2–4 вариантами ответов — я отвечу кликом. "
+            "Если у меня вопрос — я задам его текстом. Сам тест не начинай, пока я не нажму кнопку «Начать тест»."
+        )
+        ai_turn = await ai_training_service.generate_turn(
+            draft=updated_draft,
+            user_message=first_message,
+            is_new_dialogue=True,
+            subject_id=subject_id,
+            history=history,
+        )
+        updated_draft = training_service.apply_ai_turn(updated_draft, ai_turn)
+        await state.update_data(
+            draft=updated_draft.model_dump(),
+            quiz_options=(ai_turn.quiz.options if ai_turn.quiz else None),
+        )
+        history.append(ChatMessage(role="user", content=first_message))
+        history.append(ChatMessage(role="assistant", content=ai_turn.reply))
+        await state.update_data(history=[item.model_dump() for item in history[-12:]])
+        await _reply_with_turn(
+            message, state, session_factory, training_service, subject_id, updated_draft, ai_turn, settings
+        )
+        return
 
-        await message.answer(ai_turn.reply, reply_markup=cancel_keyboard())
+    if not moderator.is_clean(user_text):
+        async with session_factory() as session:
+            await AuditLogRepository(session).create(
+                action="moderation.warn",
+                status="warn",
+                subject_id=subject_id,
+                meta={"channel": "telegram", "direction": "in"},
+            )
+        await message.answer("Давай без грубостей 🙂 Вернёмся к регламенту.", reply_markup=cancel_keyboard())
+        return
+
+    await _continue_learning(
+        message, state, settings, training_service, ai_training_service, session_factory, user_text
+    )
+
+
+@router.callback_query(StateFilter(TrainingStates.active), F.data.regexp(r"^quiz:\d+$"))
+async def handle_quiz_choice(
+    callback: CallbackQuery,
+    state: FSMContext,
+    settings: Settings,
+    training_service: TrainingService,
+    ai_training_service: AITrainingService,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Ответ кликом по варианту вопроса раздела."""
+    state_data = await state.get_data()
+    draft = TrainingSessionDraft.model_validate(state_data.get("draft", {}))
+    options = state_data.get("quiz_options") or []
+    index = int((callback.data or "").split(":")[1])
+    message = _callback_message(callback)
+    if message is None:
+        await callback.answer("Напишите /start, чтобы продолжить.", show_alert=True)
+        return
+    if draft.phase != "learning" or index >= len(options):
+        await callback.answer("Этот вопрос уже неактуален.")
+        return
+    await callback.answer()
+    await _continue_learning(
+        message, state, settings, training_service, ai_training_service, session_factory, options[index]
+    )
+
+
+async def _continue_learning(
+    message: Message,
+    state: FSMContext,
+    settings: Settings,
+    training_service: TrainingService,
+    ai_training_service: AITrainingService,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_text: str,
+) -> None:
+    """Один ход диалога обучения/теста: запрос к наставнику, фиксация состояния, ответ с кнопками."""
+    state_data = await state.get_data()
+    draft = TrainingSessionDraft.model_validate(state_data.get("draft", {}))
+    subject_id = _subject_id(message)
+    history = [ChatMessage.model_validate(item) for item in state_data.get("history", [])]
+
+    try:
+        ai_turn = await ai_training_service.generate_turn(
+            draft=draft,
+            user_message=user_text,
+            is_new_dialogue=False,
+            subject_id=subject_id,
+            history=history,
+        )
+        updated_draft = training_service.apply_ai_turn(draft, ai_turn)
+        await state.update_data(
+            draft=updated_draft.model_dump(),
+            quiz_options=(ai_turn.quiz.options if ai_turn.quiz else None),
+        )
+        history.append(ChatMessage(role="user", content=user_text))
+        history.append(ChatMessage(role="assistant", content=ai_turn.reply))
+        await state.update_data(history=[item.model_dump() for item in history[-12:]])
+        await _reply_with_turn(
+            message, state, session_factory, training_service, subject_id, updated_draft, ai_turn, settings
+        )
     except ValueError as exc:
         await message.answer(str(exc), reply_markup=cancel_keyboard())
     except Exception:
@@ -340,6 +392,54 @@ async def process_ai_training(
             "Не удалось обработать сообщение. Попробуйте еще раз или отправьте /cancel.",
             reply_markup=cancel_keyboard(),
         )
+
+
+async def _reply_with_turn(
+    message: Message,
+    state: FSMContext,
+    session_factory: async_sessionmaker[AsyncSession],
+    training_service: TrainingService,
+    subject_id: str | None,
+    draft: TrainingSessionDraft,
+    ai_turn: TrainingAssistantTurn,
+    settings: Settings,
+) -> None:
+    """Показывает ход наставника: вердикт теста, вопрос раздела с кнопками, финал."""
+    reply = ai_turn.reply
+    if not moderator.is_clean(reply):
+        async with session_factory() as session:
+            await AuditLogRepository(session).create(
+                action="moderation.warn",
+                status="warn",
+                subject_id=subject_id,
+                meta={"channel": "telegram", "direction": "out"},
+            )
+        reply = "Извини, не могу ответить в таком тоне. Давай вернёмся к регламенту 🙂"
+
+    if ai_turn.phase == "completed":
+        async with session_factory() as session:
+            await training_service.create_result(
+                repository=TrainingResultRepository(session),
+                draft=draft,
+                topic=settings.training_topic,
+                subject_id=subject_id or "tg:unknown",
+                channel="telegram",
+                answer_repository=TrainingAnswerRepository(session),
+            )
+        await state.clear()
+        await message.answer(
+            f"{reply}\n\n"
+            f"Результат сохранен в Postgres.\n"
+            f"Итог: {draft.correct_answers}/{draft.total_questions} ({draft.score_percent()}%).",
+            reply_markup=remove_keyboard(),
+        )
+        return
+
+    if ai_turn.quiz and draft.phase == "learning":
+        await message.answer(reply, reply_markup=cancel_keyboard())
+        await message.answer(f"❓ {ai_turn.quiz.question}", reply_markup=quiz_keyboard(ai_turn.quiz.options))
+    else:
+        await message.answer(reply, reply_markup=cancel_keyboard())
 
 
 @router.message(TrainingStates.active)
