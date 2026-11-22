@@ -114,6 +114,11 @@ class RAGService:
         async with self._session_factory() as session:
             return await KnowledgeChunkRepository(session).list_documents()
 
+    async def section_titles(self) -> list[str]:
+        """Названия разделов базы знаний в порядке прохождения (маршрут обучения)."""
+        async with self._session_factory() as session:
+            return await KnowledgeChunkRepository(session).list_titles()
+
     async def delete_document(self, document_id: int) -> int:
         async with self._session_factory() as session:
             return await KnowledgeChunkRepository(session).delete_document(document_id)

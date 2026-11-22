@@ -65,6 +65,8 @@ class TrainingSessionDraft(BaseModel):
     last_answer_feedback: str | None = None
     final_summary: str | None = None
     evaluated_answers: list[EvaluatedAnswer] = Field(default_factory=list)
+    # Названия разделов регламента, пройденных в обучении (маршрут: все разделы -> тест).
+    covered_sections: list[str] = Field(default_factory=list)
 
     @field_validator("employee_name", "current_question", "last_answer_feedback", "final_summary")
     @classmethod
@@ -88,6 +90,8 @@ class TrainingAssistantTurn(BaseModel):
     answer_feedback: str | None = None
     next_question: str | None = None
     final_summary: str | None = None
+    # Заполняется моделью: точное название раздела, который только что завершён (иначе null).
+    section_completed: str | None = None
     # Заполняется сервисом (не моделью): к какому чанку базы знаний отнесен оцененный вопрос.
     question_chunk_title: str | None = None
 

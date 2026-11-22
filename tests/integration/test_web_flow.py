@@ -96,6 +96,8 @@ async def test_full_web_flow_from_invite_to_result(client):
     turn = testing.json()["turn"]
     assert turn["phase"] == "testing"
     assert "химию" in turn["next_question"]
+    # Без базы знаний маршрут не задан (total=0) — ограничения на вход нет.
+    assert testing.json()["coverage"] == {"covered": 0, "total": 0}
 
     # Ответ на вопрос завершает тест (третий вызов модели).
     finished = await client.post("/api/message", json={"text": "В отдельный пакет, отдельно от продуктов"})

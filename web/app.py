@@ -128,12 +128,21 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
     from web.sessions import WebSessionStore
 
     store = WebSessionStore()
+    curriculum = {"total": 0}  # число разделов маршрута обучения; 0 — маршрут не задан
 
     app = FastAPI(title="AI-наставник", docs_url=None, openapi_url=None)
+
+    async def refresh_curriculum() -> None:
+        try:
+            curriculum["total"] = len(await rag_service.section_titles())
+        except Exception:
+            logger.exception("Failed to compute curriculum total")
+            curriculum["total"] = 0
 
     @app.on_event("startup")
     async def startup() -> None:
         await init_db(engine)
+        await refresh_curriculum()
 
     def current_session(request: Request):
         session = store.get(request.cookies.get(SESSION_COOKIE))
@@ -153,6 +162,10 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
             "state": session.state,
             "draft": session.draft.model_dump(),
             "consent_text": ConsentService.PRIVACY_NOTICE if session.state == "awaiting_consent" else None,
+            "coverage": {
+                "covered": len(session.draft.covered_sections),
+                "total": curriculum["total"],
+            },
         }
 
     def history_payload(session) -> list[ChatMessage]:
@@ -262,8 +275,16 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
         if web_session.state != "active":
             raise HTTPException(status_code=409, detail="Сессия обучения не активна.")
 
+        wants_test = payload.text.strip() == "/start_test"
+        if wants_test and not await ai_training_service.is_curriculum_complete(web_session.draft):
+            covered, total = await ai_training_service.curriculum_status(web_session.draft)
+            raise HTTPException(
+                status_code=409,
+                detail=f"Сначала пройдите обучение: разделов пройдено {covered} из {total}.",
+            )
+
         try:
-            if payload.text.strip() == "/start_test":
+            if wants_test:
                 turn = await ai_training_service.start_testing(
                     draft=web_session.draft,
                     subject_id=web_session.subject_id,
@@ -352,6 +373,7 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
         require_admin(request)
         try:
             document_id = await rag_service.ingest(source=payload.source, text=payload.content)
+            await refresh_curriculum()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"document_id": document_id}
@@ -377,6 +399,7 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
     async def delete_knowledge(document_id: int, request: Request) -> dict:
         require_admin(request)
         deleted = await rag_service.delete_document(document_id)
+        await refresh_curriculum()
         return {"deleted_chunks": deleted}
 
     @app.get("/api/admin/results")

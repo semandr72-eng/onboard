@@ -61,13 +61,17 @@ class AITrainingService:
         всё равно вернула learning или не задала вопрос — выполняется один повтор
         с жёсткой инструкцией, после чего phase выставляется принудительно.
         """
+        if not await self.is_curriculum_complete(draft):
+            covered, total = await self.curriculum_status(draft)
+            raise RuntimeError(
+                f"Обучение не завершено: пройдено разделов {covered} из {total}. Сначала пройдите все разделы."
+            )
         testing_draft = draft.model_copy(update={"phase": "testing"})
         transition_message = (
             "Я прошёл обучение и нажимаю «Начать тест». Начни тестирование: "
             "phase=testing, в next_question задай первый вопрос по материалу, "
             "в reply — одна короткая фраза с пожеланием удачи и одним эмодзи (например 🍀), без пересказа материала. "
-            "Важно: задавай вопросы теста только по темам, которые разбирались в истории этого диалога; "
-            "по разделам, которые мы не обсуждали, вопросов не задавай."
+            "Все разделы пройдены, поэтому вопросы можешь задавать по любым разделам материала."
         )
         turn = await self.generate_turn(
             draft=testing_draft,
@@ -95,6 +99,7 @@ class AITrainingService:
         subject_id: str | None = None,
         history: list[ChatMessage] | None = None,
     ) -> TrainingAssistantTurn:
+        sections: list[str] = []
         hits = []
         if self._rag is not None:
             query = self._build_retrieval_query(draft, user_message)
@@ -102,11 +107,16 @@ class AITrainingService:
                 hits = await self._rag.retrieve(query)
             except Exception:
                 logger.exception("RAG retrieval failed, falling back to static material")
+            try:
+                sections = await self.section_titles()
+            except Exception:
+                logger.exception("Failed to load section titles, learning without fixed route")
+                sections = []
 
         material = self._training_material
         if hits and self._rag is not None:
             material = self._rag.build_context(hits)
-        messages = self._build_messages(draft, user_message, is_new_dialogue, material, history)
+        messages = self._build_messages(draft, user_message, is_new_dialogue, material, history, sections)
 
         anonymizer = Anonymizer(known_names=[draft.employee_name] if draft.employee_name else None)
         for message in messages:
@@ -123,6 +133,7 @@ class AITrainingService:
                 json_schema=AI_TRAINING_RESPONSE_SCHEMA,
             )
             turn = TrainingAssistantTurn.model_validate(response.payload)
+            turn.section_completed = self._match_section(turn.section_completed, sections)
         except Exception as exc:
             await self._write_audit(
                 subject_id=subject_id,
@@ -240,6 +251,40 @@ class AITrainingService:
         except Exception:
             logger.exception("Failed to write audit record")
 
+    async def section_titles(self) -> list[str]:
+        """Названия разделов маршрута обучения (пусто — свободный режим без маршрута)."""
+        if self._rag is None:
+            return []
+        return await self._rag.section_titles()
+
+    async def curriculum_status(self, draft: TrainingSessionDraft) -> tuple[int, int]:
+        """(пройдено разделов, всего разделов). Всего = 0, когда маршрут не задан или недоступен."""
+        try:
+            total = len(await self.section_titles())
+        except Exception:
+            logger.exception("Failed to resolve curriculum total")
+            total = 0
+        covered = len([title for title in draft.covered_sections])
+        return covered, total
+
+    async def is_curriculum_complete(self, draft: TrainingSessionDraft) -> bool:
+        """Маршрут пройден полностью (или маршрут не задан — тогда ограничений нет)."""
+        covered, total = await self.curriculum_status(draft)
+        return total == 0 or covered >= total
+
+    @staticmethod
+    def _match_section(value: str | None, sections: list[str]) -> str | None:
+        """Сверяет название завершённого раздела со списком маршрута (нормализация регистра/пробелов)."""
+        if not value:
+            return None
+        if not sections:
+            return value.strip() or None
+        normalized = value.strip().lower()
+        for title in sections:
+            if title.strip().lower() == normalized:
+                return title
+        return None
+
     @staticmethod
     def _build_retrieval_query(draft: TrainingSessionDraft, user_message: str) -> str:
         """Запрос к базе знаний: по умолчанию от сообщения сотрудника.
@@ -260,6 +305,7 @@ class AITrainingService:
         is_new_dialogue: bool,
         material: str,
         history: list[ChatMessage] | None = None,
+        sections: list[str] | None = None,
     ) -> list[dict[str, str]]:
         serialized_draft = json.dumps(
             draft.model_dump(exclude={"employee_name"}),
@@ -277,6 +323,7 @@ class AITrainingService:
                     topic=self._settings.training_topic,
                     material=material,
                     total_questions=draft.total_questions,
+                    sections=sections,
                 ),
             },
             *history_messages,

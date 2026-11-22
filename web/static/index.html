@@ -355,6 +355,9 @@ function updateProgress(draft) {
   const badge = document.getElementById("phase-badge");
   const wrap = document.getElementById("progress-wrap");
   const testBtn = document.getElementById("start-test-btn");
+  const coverage = (lastState && lastState.coverage) || { covered: 0, total: 0 };
+  const curriculumActive = coverage.total > 0;
+  const curriculumDone = !curriculumActive || coverage.covered >= coverage.total;
   updateSteps(draft.phase === "testing" ? "step-test" : "step-chat");
   if (draft.phase === "testing") {
     badge.textContent = "✍️ Тестирование";
@@ -365,9 +368,15 @@ function updateProgress(draft) {
     document.getElementById("progress-bar").style.width = pct + "%";
     document.getElementById("progress-label").textContent = pct + "%";
   } else {
-    badge.textContent = "🎓 Обучение";
+    badge.textContent = curriculumActive
+      ? "🎓 Обучение · раздел " + Math.min(coverage.covered, coverage.total) + " из " + coverage.total
+      : "🎓 Обучение";
     wrap.style.display = "none";
-    testBtn.classList.remove("hidden");
+    testBtn.disabled = !curriculumDone;
+    testBtn.textContent = curriculumDone
+      ? "🚀 Я всё изучил — начать тест"
+      : "🚀 Пройдено разделов " + coverage.covered + " из " + coverage.total;
+    if (curriculumDone) testBtn.classList.remove("hidden");
   }
 }
 

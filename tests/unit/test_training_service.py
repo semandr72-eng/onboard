@@ -99,3 +99,32 @@ def test_learning_turn_does_not_evaluate_answers():
     )
     assert draft.evaluated_answers == []
     assert draft.questions_answered == 1
+
+
+def test_apply_ai_turn_collects_completed_section():
+    service = TrainingService()
+    turn = _turn(
+        phase="learning",
+        latest_answer_evaluated=False,
+        answer_is_correct=None,
+        next_question=None,
+        section_completed="ЧАНК 1. Смена",
+    )
+    draft = service.apply_ai_turn(_draft(phase="learning", current_question=None), turn)
+    assert draft.covered_sections == ["ЧАНК 1. Смена"]
+
+
+def test_apply_ai_turn_deduplicates_completed_sections():
+    service = TrainingService()
+    turn = _turn(
+        phase="learning",
+        latest_answer_evaluated=False,
+        answer_is_correct=None,
+        next_question=None,
+        section_completed="ЧАНК 1. Смена",
+    )
+    draft = service.apply_ai_turn(
+        _draft(phase="learning", current_question=None, covered_sections=["ЧАНК 1. Смена"]),
+        turn,
+    )
+    assert draft.covered_sections == ["ЧАНК 1. Смена"]

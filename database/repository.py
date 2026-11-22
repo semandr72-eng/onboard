@@ -299,6 +299,15 @@ class KnowledgeChunkRepository:
         result = await self._session.execute(statement)
         return list(result.scalars().all())
 
+    async def list_titles(self) -> list[str]:
+        statement = (
+            select(KnowledgeChunk.title)
+            .group_by(KnowledgeChunk.title)
+            .order_by(func.min(KnowledgeChunk.document_id), func.min(KnowledgeChunk.ordinal))
+        )
+        result = await self._session.execute(statement)
+        return [str(row[0]) for row in result.all()]
+
     async def delete_document(self, document_id: int) -> int:
         statement = delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id)
         result = cast("CursorResult[None]", await self._session.execute(statement))

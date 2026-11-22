@@ -207,6 +207,15 @@ async def handle_start_test(
         )
         return
 
+    if not await ai_training_service.is_curriculum_complete(draft):
+        covered, total = await ai_training_service.curriculum_status(draft)
+        await message.answer(
+            f"Тест откроется после прохождения всего обучения: разделов пройдено {covered} из {total}. "
+            "Продолжим — просто напиши сообщение.",
+            reply_markup=cancel_keyboard(),
+        )
+        return
+
     history = [ChatMessage.model_validate(item) for item in state_data.get("history", [])]
     subject_id = _subject_id(message)
     try:
