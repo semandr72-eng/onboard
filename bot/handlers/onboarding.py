@@ -422,6 +422,10 @@ async def _reply_with_turn(
                 answer_repository=TrainingAnswerRepository(session),
             )
         await state.clear()
+        # Имя подставляем локально — в ИИ оно не отправляется (обезличивание по 152-ФЗ).
+        first_name = (draft.employee_name or "").split()[0] if draft.employee_name else ""
+        if first_name and reply:
+            reply = f"{first_name}, " + reply[0].lower() + reply[1:]
         await message.answer(
             f"{reply}\n\n"
             f"Результат сохранен в Postgres.\n"

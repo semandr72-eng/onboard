@@ -274,7 +274,7 @@
 
   <div id="screen-done" class="hidden">
     <div class="final-hero">🎉</div>
-    <h2 style="text-align:center">Тест пройден!</h2>
+    <h2 style="text-align:center" id="done-title">Тест пройден!</h2>
     <div class="score-ring" id="score-ring"><div id="score-num">0%</div></div>
     <div class="score-detail" id="score-detail"></div>
     <div class="notice" id="final-summary"></div>
@@ -423,13 +423,21 @@ function addMsg(cls, text) {
 }
 
 function showDone(draft, finalSummary) {
+  // Имя подставляем локально — в ИИ оно не отправляется (обезличивание по 152-ФЗ).
+  const name = ((lastState && lastState.draft && lastState.draft.employee_name) || "").trim();
+  const firstName = name.split(/\s+/)[0] || "";
+  document.getElementById("done-title").textContent = firstName ? firstName + ", тест пройден!" : "Тест пройден!";
   const pct = draft.total_questions ? Math.round(draft.correct_answers / draft.total_questions * 100) : 0;
   document.getElementById("score-num").textContent = pct + "%";
   document.getElementById("score-ring").style.background =
     "conic-gradient(var(--green-500) " + Math.round(pct * 3.6) + "deg, var(--green-100) 0deg)";
   document.getElementById("score-detail").textContent =
     "Верных ответов: " + draft.correct_answers + " из " + draft.total_questions;
-  document.getElementById("final-summary").textContent = finalSummary || draft.final_summary || "";
+  let summaryText = finalSummary || draft.final_summary || "";
+  if (firstName && summaryText) {
+    summaryText = firstName + ", " + summaryText.charAt(0).toLowerCase() + summaryText.slice(1);
+  }
+  document.getElementById("final-summary").textContent = summaryText;
   showScreen("done");
 }
 
