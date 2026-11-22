@@ -284,7 +284,8 @@
   <div id="screen-declined" class="hidden">
     <div class="final-hero">🙁</div>
     <h2 style="text-align:center">Обучение недоступно</h2>
-    <p class="sub">Без согласия мы не сможем сохранить твой результат, поэтому обучение пока не начнётся. Передумал — просто обнови страницу и начни заново.</p>
+    <p class="sub">Без согласия мы не сможем сохранить твой результат, поэтому обучение пока не начнётся.</p>
+    <button onclick="restartFromDeclined()">Я передумал — начать заново 🔄</button>
   </div>
 
 </div>
@@ -558,6 +559,21 @@ async function sendMessage(presetText) {
     setSending(false);
     document.getElementById("typing").classList.add("hidden");
   }
+}
+
+async function logout() {
+  try {
+    await api("/api/logout", { method: "POST", body: "{}" });
+  } catch (e) {
+    // Сессия уже недействительна — продолжаем.
+  }
+}
+
+async function restartFromDeclined() {
+  await logout();
+  document.getElementById("invite-code").value = "";
+  showScreen("invite");
+  document.getElementById("invite-code").focus();
 }
 
 (async function init() {
