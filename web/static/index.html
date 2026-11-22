@@ -284,6 +284,7 @@
 const screens = ["invite", "consent", "name", "chat", "done", "declined"];
 const STEP_BY_SCREEN = { invite: "step-invite", consent: "step-consent", name: "step-name", chat: "step-chat", done: "step-test", declined: "step-invite" };
 let lastState = null;
+let prevPhase = null;
 let sending = false;
 
 function updateSteps(activeId) {
@@ -340,6 +341,7 @@ function renderState(data) {
     showScreen("name");
     document.getElementById("employee-name").focus();
   } else if (state === "active") {
+    prevPhase = data.draft ? data.draft.phase : null;
     showScreen("chat");
     updateProgress(data.draft);
   } else if (state === "completed") {
@@ -391,6 +393,13 @@ function showDone(draft, finalSummary) {
 
 function renderTurn(data) {
   const turn = data.turn;
+  // Переход к тесту: чистый экран, без истории обучения.
+  const phaseNow = data.draft ? data.draft.phase : null;
+  if (phaseNow === "testing" && prevPhase !== "testing") {
+    document.getElementById("chat").innerHTML = "";
+  }
+  prevPhase = phaseNow;
+
   if (turn.answer_feedback) {
     addMsg(turn.answer_is_correct === false ? "feedback-bad" : "feedback-ok",
       (turn.answer_is_correct === false ? "💡 " : "✅ ") + turn.answer_feedback);
