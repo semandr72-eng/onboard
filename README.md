@@ -1,6 +1,6 @@
 # onboard
 
-[![CI](https://github.com/OWNER/onboard/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/onboard/actions/workflows/ci.yml)
+[![CI](https://github.com/semandr72-eng/onboard/actions/workflows/ci.yml/badge.svg)](https://github.com/semandr72-eng/onboard/actions/workflows/ci.yml)
 
 AI-наставник для обучения сотрудников новому материалу и автоматического тестирования.
 Два канала доступа: Telegram-бот и веб-чат (мини-сайт). Работает на DeepSeek через OpenAI-совместимый API,
