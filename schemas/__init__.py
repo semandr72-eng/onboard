@@ -1,7 +1,6 @@
 from .training import (
     ChatMessage,
     EvaluatedAnswer,
-    Quiz,
     TrainingAssistantTurn,
     TrainingResultCreate,
     TrainingResultRead,
@@ -11,7 +10,6 @@ from .training import (
 __all__ = [
     "ChatMessage",
     "EvaluatedAnswer",
-    "Quiz",
     "TrainingAssistantTurn",
     "TrainingResultCreate",
     "TrainingResultRead",

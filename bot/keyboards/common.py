@@ -37,10 +37,13 @@ def confirm_delete_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def quiz_keyboard(options: list[str]) -> InlineKeyboardMarkup:
-    """Варианты ответа на вопрос раздела: один клик вместо ввода текста."""
-    rows = [
-        [InlineKeyboardButton(text=option[:60], callback_data=f"quiz:{index}")]
-        for index, option in enumerate(options[:4])
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+NEXT_SECTION_TEXT = "Понятно, дальше →"
+
+
+def learning_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиши обучения: переход к следующему разделу (вопросы — обычным текстом)."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=NEXT_SECTION_TEXT)]],
+        resize_keyboard=True,
+        input_field_placeholder="Задай вопрос или нажми «Понятно, дальше»",
+    )

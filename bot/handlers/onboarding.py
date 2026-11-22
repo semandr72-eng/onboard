@@ -8,7 +8,14 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.keyboards import cancel_keyboard, confirm_delete_keyboard, consent_keyboard, quiz_keyboard, remove_keyboard
+from bot.keyboards import (
+    NEXT_SECTION_TEXT,
+    cancel_keyboard,
+    confirm_delete_keyboard,
+    consent_keyboard,
+    learning_keyboard,
+    remove_keyboard,
+)
 from config import Settings
 from database import AuditLogRepository, ConsentRepository, TrainingAnswerRepository, TrainingResultRepository
 from schemas import ChatMessage, TrainingAssistantTurn, TrainingSessionDraft
@@ -283,9 +290,9 @@ async def process_ai_training(
         first_message = (
             "Привет! 👋 Давай изучим регламент по шагам: 1) начало смены и получение заказа, "
             "2) поиск товаров и замены, 3) упаковка и температурный режим, 4) завершение сборки. "
-            "Разбирай разделы строго по порядку, простыми словами, с примерами. После объяснения "
-            "каждого раздела задавай мне один короткий вопрос с 2–4 вариантами ответов — я отвечу кликом. "
-            "Если у меня вопрос — я задам его текстом. Сам тест не начинай, пока я не нажму кнопку «Начать тест»."
+            "Начни с первого раздела маршрута: кратко объясни его суть простыми словами, с примерами. "
+            "На мои вопросы отвечай по регламенту. К следующему разделу перейдёшь, когда я нажму «Понятно»; "
+            "сам тест не начинай, пока я не нажму кнопку «Начать тест»."
         )
         ai_turn = await ai_training_service.generate_turn(
             draft=updated_draft,
@@ -295,10 +302,7 @@ async def process_ai_training(
             history=history,
         )
         updated_draft = training_service.apply_ai_turn(updated_draft, ai_turn)
-        await state.update_data(
-            draft=updated_draft.model_dump(),
-            quiz=(ai_turn.quiz.model_dump() if ai_turn.quiz else None),
-        )
+        await state.update_data(draft=updated_draft.model_dump(), name_collected=True)
         history.append(ChatMessage(role="user", content=first_message))
         history.append(ChatMessage(role="assistant", content=ai_turn.reply))
         await state.update_data(history=[item.model_dump() for item in history[-12:]])
@@ -323,33 +327,6 @@ async def process_ai_training(
     )
 
 
-@router.callback_query(StateFilter(TrainingStates.active), F.data.regexp(r"^quiz:\d+$"))
-async def handle_quiz_choice(
-    callback: CallbackQuery,
-    state: FSMContext,
-    settings: Settings,
-    training_service: TrainingService,
-    ai_training_service: AITrainingService,
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    """Ответ кликом по варианту вопроса раздела."""
-    state_data = await state.get_data()
-    draft = TrainingSessionDraft.model_validate(state_data.get("draft", {}))
-    options = (state_data.get("quiz") or {}).get("options") or []
-    index = int((callback.data or "").split(":")[1])
-    message = _callback_message(callback)
-    if message is None:
-        await callback.answer("Напишите /start, чтобы продолжить.", show_alert=True)
-        return
-    if draft.phase != "learning" or index >= len(options):
-        await callback.answer("Этот вопрос уже неактуален.")
-        return
-    await callback.answer()
-    await _continue_learning(
-        message, state, settings, training_service, ai_training_service, session_factory, options[index]
-    )
-
-
 async def _continue_learning(
     message: Message,
     state: FSMContext,
@@ -365,29 +342,26 @@ async def _continue_learning(
     subject_id = _subject_id(message)
     history = [ChatMessage.model_validate(item) for item in state_data.get("history", [])]
 
-    # Ответ на вопрос раздела: вердикт считает код (correct_index живёт только в состоянии сервера).
-    quiz_data = state_data.get("quiz")
+    # «Понятно»: переход к следующему разделу ведёт код, не модель.
+    titles = await ai_training_service.section_titles()
     llm_text = user_text
-    quiz_correct = False
-    if quiz_data and draft.phase == "learning":
-        options = quiz_data.get("options") or []
-        chosen = next(
-            (index for index, option in enumerate(options) if user_text.strip() == option.strip()),
-            None,
-        )
-        if chosen is not None:
-            quiz_correct = chosen == quiz_data.get("correct_index")
-            if quiz_correct:
-                llm_text += (
-                    "\n\n[служебная пометка для наставника: выбранный вариант верен. Раздел засчитан "
-                    "автоматически — кратко подтверди и в этом же ответе переходи к следующему разделу: "
-                    "кратко объясни его суть и задай новый вопрос с вариантами.]"
-                )
-            else:
-                llm_text += (
-                    "\n\n[служебная пометка для наставника: выбранный вариант неверен. Одним коротким "
-                    "сообщением объясни ошибку по материалу и повтори ДОСЛОВНО тот же вопрос с теми же вариантами.]"
-                )
+    wants_next = user_text.strip() == NEXT_SECTION_TEXT and draft.phase == "learning" and bool(titles)
+    if wants_next:
+        covered_count = len(draft.covered_sections)
+        if covered_count < len(titles):
+            draft = training_service.mark_section_covered(draft, titles[covered_count])
+            covered_count += 1
+        if covered_count >= len(titles):
+            llm_text = (
+                "[служебная пометка: сотрудник нажал «Понятно». Все разделы пройдены. "
+                "Кратко подведи итог обучения и предложи нажать «Начать тест».]"
+            )
+        else:
+            llm_text = (
+                f"[служебная пометка: сотрудник нажал «Понятно». Переходи к разделу "
+                f"«{titles[covered_count]}»: кратко объясни его суть простыми словами, с примерами "
+                "из практики сборки, и предложи задать вопросы.]"
+            )
 
     try:
         ai_turn = await ai_training_service.generate_turn(
@@ -397,16 +371,8 @@ async def _continue_learning(
             subject_id=subject_id,
             history=history,
         )
-        if quiz_correct:
-            titles = await ai_training_service.section_titles()
-            covered = len(draft.covered_sections)
-            if covered < len(titles):
-                draft = training_service.mark_section_covered(draft, titles[covered])
         updated_draft = training_service.apply_ai_turn(draft, ai_turn)
-        await state.update_data(
-            draft=updated_draft.model_dump(),
-            quiz=(ai_turn.quiz.model_dump() if ai_turn.quiz else None),
-        )
+        await state.update_data(draft=updated_draft.model_dump())
         history.append(ChatMessage(role="user", content=user_text))
         history.append(ChatMessage(role="assistant", content=ai_turn.reply))
         await state.update_data(history=[item.model_dump() for item in history[-12:]])
@@ -464,9 +430,8 @@ async def _reply_with_turn(
         )
         return
 
-    if ai_turn.quiz and draft.phase == "learning":
-        await message.answer(reply, reply_markup=cancel_keyboard())
-        await message.answer(f"❓ {ai_turn.quiz.question}", reply_markup=quiz_keyboard(ai_turn.quiz.options))
+    if draft.phase == "learning":
+        await message.answer(reply, reply_markup=learning_keyboard())
     else:
         await message.answer(reply, reply_markup=cancel_keyboard())
 

@@ -1,3 +1,17 @@
-from .common import cancel_keyboard, confirm_delete_keyboard, consent_keyboard, quiz_keyboard, remove_keyboard
+from .common import (
+    NEXT_SECTION_TEXT,
+    cancel_keyboard,
+    confirm_delete_keyboard,
+    consent_keyboard,
+    learning_keyboard,
+    remove_keyboard,
+)
 
-__all__ = ["cancel_keyboard", "confirm_delete_keyboard", "consent_keyboard", "quiz_keyboard", "remove_keyboard"]
+__all__ = [
+    "NEXT_SECTION_TEXT",
+    "cancel_keyboard",
+    "confirm_delete_keyboard",
+    "consent_keyboard",
+    "learning_keyboard",
+    "remove_keyboard",
+]

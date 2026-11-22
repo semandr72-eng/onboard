@@ -18,25 +18,6 @@ class ChatMessage(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
 
 
-class Quiz(BaseModel):
-    """Контрольный вопрос по разделу с вариантами ответа (сотрудник отвечает кликом по кнопке).
-
-    correct_index — номер верного варианта (с нуля). Хранится только на сервере,
-    в интерфейс сотрудника не передаётся: вердикт вычисляет код, а не модель.
-    """
-
-    question: str = Field(min_length=1, max_length=500)
-    options: list[str] = Field(min_length=2, max_length=4)
-    correct_index: int = Field(ge=0, le=3)
-
-    @field_validator("question", "options")
-    @classmethod
-    def normalize(cls, value):
-        if isinstance(value, str):
-            return _normalize_text(value)
-        return [_normalize_text(item) or "" for item in value]
-
-
 class EvaluatedAnswer(BaseModel):
     """Оцененный ответ на вопрос теста. Копится в черновике сессии, сохраняется вместе с результатом."""
 
@@ -109,10 +90,7 @@ class TrainingAssistantTurn(BaseModel):
     answer_feedback: str | None = None
     next_question: str | None = None
     final_summary: str | None = None
-    # Заполняется моделью в обучении: контрольный вопрос по разделу с вариантами ответа (иначе null).
-    # Вердикт по ответу вычисляет сервер (correct_index), поле для модели не требуется.
-    quiz: Quiz | None = None
-    # Устарело: разделы засчитывает сервер. Поле оставлено для совместимости, не используется.
+    # Устарело: маршрут ведёт код (кнопка «Понятно»). Поле оставлено для совместимости, не используется.
     section_completed: str | None = None
     # Заполняется сервисом (не моделью): к какому чанку базы знаний отнесен оцененный вопрос.
     question_chunk_title: str | None = None

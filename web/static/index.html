@@ -180,20 +180,13 @@
   .composer input { flex: 1; margin-bottom: 0; }
   .composer button { width: 52px; padding: 0; font-size: 18px; border-radius: 14px; flex-shrink: 0; }
 
-  /* Панель вопроса по разделу: вопрос + варианты ответа кликом + вопрос наставнику */
-  .quiz-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-  .quiz-bar .quiz-question {
-    width: 100%;
-    font-weight: 700;
-    font-size: 13.5px;
-    color: #9a3412;
-    background: #fff7ed;
-    border: 1px solid #fed7aa;
-    border-radius: 12px;
-    padding: 10px 14px;
+  /* Панель действий в обучении: вопрос наставнику или переход к следующему разделу */
+  .learn-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .learn-actions button { width: auto; padding: 10px 14px; font-size: 13.5px; border-radius: 12px; margin-top: 0; }
+  .learn-actions .next-section {
+    background: linear-gradient(135deg, var(--green-500), var(--green-600));
+    color: #fff; font-weight: 700;
   }
-  .quiz-bar button { width: auto; padding: 10px 14px; font-size: 13.5px; border-radius: 12px; margin-top: 0; }
-  .quiz-bar .quiz-ask { border-color: var(--green-500); color: var(--green-700); font-weight: 700; }
 
   /* Финал */
   .final-hero { text-align: center; font-size: 52px; margin: 4px 0 12px; }
@@ -268,7 +261,7 @@
       <div class="progress-label" id="progress-label">0%</div>
     </div>
     <div id="chat"></div>
-    <div id="quiz-bar" class="quiz-bar hidden"></div>
+    <div id="learn-actions" class="learn-actions hidden"></div>
     <div class="typing hidden" id="typing"><span></span><span></span><span></span></div>
     <div class="composer">
       <input type="text" id="message-input" placeholder="Напиши ответ или задай вопрос…" autocomplete="off"
@@ -396,36 +389,28 @@ function updateProgress(draft) {
   }
 }
 
-function renderQuiz(quiz) {
-  const bar = document.getElementById("quiz-bar");
+function renderLearnActions(visible) {
+  const bar = document.getElementById("learn-actions");
   bar.innerHTML = "";
-  if (!quiz || !quiz.options || !quiz.options.length) {
+  if (!visible) {
     bar.classList.add("hidden");
     return;
   }
-  if (quiz.question) {
-    const label = document.createElement("div");
-    label.className = "quiz-question";
-    label.textContent = "❓ " + quiz.question;
-    bar.appendChild(label);
-  }
-  quiz.options.forEach(option => {
-    const btn = document.createElement("button");
-    btn.className = "secondary";
-    btn.textContent = option;
-    btn.onclick = () => sendMessage(option);
-    bar.appendChild(btn);
-  });
   const ask = document.createElement("button");
-  ask.className = "secondary quiz-ask";
+  ask.className = "secondary";
   ask.textContent = "💬 Задать вопрос";
   ask.onclick = () => document.getElementById("message-input").focus();
   bar.appendChild(ask);
+  const next = document.createElement("button");
+  next.className = "next-section";
+  next.textContent = "Понятно, дальше →";
+  next.onclick = () => sendMessage("/next_section");
+  bar.appendChild(next);
   bar.classList.remove("hidden");
 }
 
-function hideQuiz() {
-  document.getElementById("quiz-bar").classList.add("hidden");
+function hideLearnActions() {
+  document.getElementById("learn-actions").classList.add("hidden");
 }
 
 function addMsg(cls, text) {
@@ -468,7 +453,7 @@ function renderTurn(data) {
     addMsg("question", "❓ " + turn.next_question);
   }
 
-  renderQuiz(data.draft && data.draft.phase === "learning" ? turn.quiz : null);
+  renderLearnActions(data.draft && data.draft.phase === "learning");
 
   if (data.state === "completed" || turn.phase === "completed") {
     showDone(data.draft, turn.final_summary);
@@ -524,7 +509,7 @@ async function sendName() {
 
 async function startTest() {
   if (sending) return;
-  hideQuiz();
+  hideLearnActions();
   setSending(true);
   document.getElementById("typing").classList.remove("hidden");
   try {
@@ -545,8 +530,9 @@ async function sendMessage(presetText) {
   const text = (presetText !== undefined ? presetText : input.value).trim();
   if (!text) return;
   if (presetText === undefined) input.value = "";
-  addMsg("user", text);
-  hideQuiz();
+  const display = text === "/next_section" ? "Понятно 👌" : text;
+  addMsg("user", display);
+  hideLearnActions();
   setSending(true);
   document.getElementById("typing").classList.remove("hidden");
   try {

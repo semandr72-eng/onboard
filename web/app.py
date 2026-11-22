@@ -44,9 +44,9 @@ HISTORY_LIMIT = 12  # сообщений (6 реплик наставника + 
 FIRST_MESSAGE_TEXT = (
     "Привет! 👋 Давай изучим регламент по шагам: 1) начало смены и получение заказа, "
     "2) поиск товаров и замены, 3) упаковка и температурный режим, 4) завершение сборки. "
-    "Разбирай разделы строго по порядку, простыми словами, с примерами. После объяснения "
-    "каждого раздела задавай мне один короткий вопрос с 2–4 вариантами ответов — я отвечу кликом. "
-    "Если у меня вопрос — я задам его текстом. Сам тест не начинай, пока я не нажму кнопку «Начать тест»."
+    "Начни с первого раздела маршрута: кратко объясни его суть простыми словами, с примерами. "
+    "На мои вопросы отвечай по регламенту. К следующему разделу перейдёшь, когда я нажму «Понятно»; "
+    "сам тест не начинай, пока я не нажму кнопку «Начать тест»."
 )
 
 
@@ -310,29 +310,30 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
                 detail=f"Сначала пройдите обучение: разделов пройдено {covered} из {total}.",
             )
 
-        # Ответ на вопрос раздела: вердикт считает код (correct_index хранится только на сервере).
-        quiz = web_session.quiz
+        # «Понятно»: переход к следующему разделу ведёт код, не модель.
+        titles = sections_state["titles"]
+        display_text = payload.text
         llm_text = payload.text
-        quiz_answer_correct: bool | None = None
-        if quiz and web_session.draft.phase == "learning":
-            stripped = payload.text.strip()
-            chosen = next(
-                (index for index, option in enumerate(quiz.options) if stripped == option.strip()),
-                None,
-            )
-            if chosen is not None:
-                quiz_answer_correct = chosen == quiz.correct_index
-                if quiz_answer_correct:
-                    llm_text += (
-                        "\n\n[служебная пометка для наставника: выбранный вариант верен. Раздел засчитан "
-                        "автоматически — кратко подтверди и в этом же ответе переходи к следующему разделу: "
-                        "кратко объясни его суть и задай новый вопрос с вариантами.]"
-                    )
-                else:
-                    llm_text += (
-                        "\n\n[служебная пометка для наставника: выбранный вариант неверен. Одним коротким "
-                        "сообщением объясни ошибку по материалу и повтори ДОСЛОВНО тот же вопрос с теми же вариантами.]"
-                    )
+        wants_next = payload.text.strip() == "/next_section" and web_session.draft.phase == "learning"
+        if wants_next and titles:
+            covered_count = len(web_session.draft.covered_sections)
+            if covered_count < len(titles):
+                web_session.draft = training_service.mark_section_covered(
+                    web_session.draft, titles[covered_count]
+                )
+                covered_count += 1
+            display_text = "Понятно 👌"
+            if covered_count >= len(titles):
+                llm_text = (
+                    "[служебная пометка: сотрудник нажал «Понятно». Все разделы пройдены. "
+                    "Кратко подведи итог обучения и предложи нажать «Начать тест».]"
+                )
+            else:
+                llm_text = (
+                    f"[служебная пометка: сотрудник нажал «Понятно». Переходи к разделу "
+                    f"«{titles[covered_count]}»: кратко объясни его суть простыми словами, с примерами "
+                    "из практики сборки, и предложи задать вопросы.]"
+                )
 
         try:
             if wants_test:
@@ -368,20 +369,11 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
                 update={"reply": "Извини, не могу ответить в таком тоне. Давай вернёмся к регламенту 🙂"}
             )
 
-        if quiz_answer_correct:
-            titles = sections_state["titles"]
-            covered_count = len(web_session.draft.covered_sections)
-            if covered_count < len(titles):
-                web_session.draft = training_service.mark_section_covered(
-                    web_session.draft, titles[covered_count]
-                )
-
         web_session.draft = training_service.apply_ai_turn(web_session.draft, turn)
-        return await _apply_turn(web_session, turn, payload.text)
+        return await _apply_turn(web_session, turn, display_text)
 
     async def _apply_turn(web_session, turn: TrainingAssistantTurn, user_text: str) -> dict:
         append_history(web_session, user_text, turn.reply)
-        web_session.quiz = turn.quiz
         body = session_payload(web_session)
         body["turn"] = {
             "reply": turn.reply,
@@ -390,7 +382,6 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
             "answer_feedback": turn.answer_feedback,
             "next_question": turn.next_question,
             "final_summary": turn.final_summary,
-            "quiz": turn.quiz.model_dump() if turn.quiz else None,
         }
         if turn.phase == "completed":
             await persist_result(web_session)

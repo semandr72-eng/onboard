@@ -2,7 +2,7 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from schemas import Quiz, TrainingSessionDraft
+from schemas import TrainingSessionDraft
 
 
 @dataclass
@@ -16,8 +16,6 @@ class WebSession:
     expires_at: datetime
     name_collected: bool = False
     history: list[dict] = field(default_factory=list)
-    # Активный вопрос раздела (с correct_index — только на сервере, в интерфейс не уходит).
-    quiz: Quiz | None = None
 
 
 @dataclass

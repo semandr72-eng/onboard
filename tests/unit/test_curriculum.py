@@ -78,24 +78,3 @@ async def test_empty_curriculum_means_no_gate():
 
     assert await service.curriculum_status(draft) == (0, 0)
     assert await service.is_curriculum_complete(draft) is True
-
-
-def test_sanitize_payload_resets_quiz_with_invalid_correct_index():
-    from services.ai_training_service import AITrainingService
-
-    bad_index = {
-        "reply": "ок",
-        "phase": "learning",
-        "quiz": {"question": "Q?", "options": ["А", "Б"], "correct_index": 5},
-    }
-    assert AITrainingService._sanitize_payload(bad_index)["quiz"] is None
-
-    few_options = {
-        "reply": "ок",
-        "phase": "learning",
-        "quiz": {"question": "Q?", "options": ["А"], "correct_index": 0},
-    }
-    assert AITrainingService._sanitize_payload(few_options)["quiz"] is None
-
-    good = {"reply": "ок", "phase": "learning", "quiz": {"question": "Q?", "options": ["А", "Б"], "correct_index": 1}}
-    assert AITrainingService._sanitize_payload(good)["quiz"]["correct_index"] == 1
