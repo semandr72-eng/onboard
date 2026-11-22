@@ -56,11 +56,13 @@ class TrainingService:
         if ai_turn.final_summary is not None:
             updated.final_summary = ai_turn.final_summary
 
-        if ai_turn.section_completed:
-            title = ai_turn.section_completed.strip()
-            if title and title not in updated.covered_sections:
-                updated.covered_sections.append(title)
+        return updated
 
+    def mark_section_covered(self, draft: TrainingSessionDraft, title: str) -> TrainingSessionDraft:
+        """Детерминированно отмечает раздел пройденным (маршрут ведёт код, не модель)."""
+        updated = TrainingSessionDraft.model_validate(draft.model_dump())
+        if title and title not in updated.covered_sections:
+            updated.covered_sections.append(title)
         return updated
 
     async def create_result(

@@ -19,10 +19,15 @@ class ChatMessage(BaseModel):
 
 
 class Quiz(BaseModel):
-    """Контрольный вопрос по разделу с вариантами ответа (сотрудник отвечает кликом по кнопке)."""
+    """Контрольный вопрос по разделу с вариантами ответа (сотрудник отвечает кликом по кнопке).
+
+    correct_index — номер верного варианта (с нуля). Хранится только на сервере,
+    в интерфейс сотрудника не передаётся: вердикт вычисляет код, а не модель.
+    """
 
     question: str = Field(min_length=1, max_length=500)
     options: list[str] = Field(min_length=2, max_length=4)
+    correct_index: int = Field(ge=0, le=3)
 
     @field_validator("question", "options")
     @classmethod
@@ -105,8 +110,9 @@ class TrainingAssistantTurn(BaseModel):
     next_question: str | None = None
     final_summary: str | None = None
     # Заполняется моделью в обучении: контрольный вопрос по разделу с вариантами ответа (иначе null).
+    # Вердикт по ответу вычисляет сервер (correct_index), поле для модели не требуется.
     quiz: Quiz | None = None
-    # Заполняется моделью: точное название раздела, который только что завершён (иначе null).
+    # Устарело: разделы засчитывает сервер. Поле оставлено для совместимости, не используется.
     section_completed: str | None = None
     # Заполняется сервисом (не моделью): к какому чанку базы знаний отнесен оцененный вопрос.
     question_chunk_title: str | None = None

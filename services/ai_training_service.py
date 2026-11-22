@@ -134,7 +134,6 @@ class AITrainingService:
             )
             payload = self._sanitize_payload(response.payload)
             turn = TrainingAssistantTurn.model_validate(payload)
-            turn.section_completed = self._match_section(turn.section_completed, sections)
             if (
                 sections
                 and draft.phase == "learning"
@@ -262,14 +261,17 @@ class AITrainingService:
 
     @staticmethod
     def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
-        """Отбрасывает некорректный quiz (меньше 2 вариантов), чтобы не ломать весь ход.
+        """Отбрасывает некорректный quiz, чтобы не ломать весь ход.
 
-        Pydantic-модель требует минимум 2 варианта; если модель вернула меньше —
-        quiz игнорируем, механизм ремонта при необходимости запросит вопрос заново.
+        Вердикт вычисляет сервер по correct_index; quiz без 2+ вариантов или
+        с индексом вне диапазона не доверяем — ремонтный запрос спросит заново.
         """
         quiz = payload.get("quiz")
-        if isinstance(quiz, dict) and len(quiz.get("options") or []) < 2:
-            payload = {**payload, "quiz": None}
+        if isinstance(quiz, dict):
+            options = quiz.get("options") or []
+            correct_index = quiz.get("correct_index")
+            if len(options) < 2 or not isinstance(correct_index, int) or not (0 <= correct_index < len(options)):
+                payload = {**payload, "quiz": None}
         return payload
 
     async def _repair_quiz(self, messages: list[dict[str, str]], turn: TrainingAssistantTurn) -> TrainingAssistantTurn:
@@ -325,19 +327,6 @@ class AITrainingService:
         """Маршрут пройден полностью (или маршрут не задан — тогда ограничений нет)."""
         covered, total = await self.curriculum_status(draft)
         return total == 0 or covered >= total
-
-    @staticmethod
-    def _match_section(value: str | None, sections: list[str]) -> str | None:
-        """Сверяет название завершённого раздела со списком маршрута (нормализация регистра/пробелов)."""
-        if not value:
-            return None
-        if not sections:
-            return value.strip() or None
-        normalized = value.strip().lower()
-        for title in sections:
-            if title.strip().lower() == normalized:
-                return title
-        return None
 
     @staticmethod
     def _build_retrieval_query(draft: TrainingSessionDraft, user_message: str) -> str:

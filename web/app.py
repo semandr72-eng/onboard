@@ -130,16 +130,20 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
     from web.sessions import WebSessionStore
 
     store = WebSessionStore()
-    curriculum = {"total": 0}  # число разделов маршрута обучения; 0 — маршрут не задан
+    curriculum = {"total": 0}  # число разделов маршрута; 0 — маршрут не задан
+    sections_state: dict[str, list[str]] = {"titles": []}  # названия разделов в порядке маршрута
 
     app = FastAPI(title="AI-наставник", docs_url=None, openapi_url=None)
 
     async def refresh_curriculum() -> None:
         try:
-            curriculum["total"] = len(await rag_service.section_titles())
+            titles = await rag_service.section_titles()
+            sections_state["titles"] = titles
+            curriculum["total"] = len(titles)
         except Exception:
             logger.exception("Failed to compute curriculum total")
             curriculum["total"] = 0
+            sections_state["titles"] = []
 
     @app.on_event("startup")
     async def startup() -> None:
@@ -266,6 +270,17 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
                 status_code=502,
                 detail="ИИ-наставник временно недоступен. Попробуйте ещё раз или обратитесь к HR.",
             ) from exc
+        if not moderator.is_clean(turn.reply):
+            async with session_factory() as session_db:
+                await AuditLogRepository(session_db).create(
+                    action="moderation.warn",
+                    status="warn",
+                    subject_id=web_session.subject_id,
+                    meta={"channel": "web", "direction": "out"},
+                )
+            turn = turn.model_copy(
+                update={"reply": "Извини, не могу ответить в таком тоне. Давай вернёмся к регламенту 🙂"}
+            )
         web_session.draft = training_service.apply_ai_turn(web_session.draft, turn)
         web_session.name_collected = True
         web_session.state = "active"
@@ -295,6 +310,30 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
                 detail=f"Сначала пройдите обучение: разделов пройдено {covered} из {total}.",
             )
 
+        # Ответ на вопрос раздела: вердикт считает код (correct_index хранится только на сервере).
+        quiz = web_session.quiz
+        llm_text = payload.text
+        quiz_answer_correct: bool | None = None
+        if quiz and web_session.draft.phase == "learning":
+            stripped = payload.text.strip()
+            chosen = next(
+                (index for index, option in enumerate(quiz.options) if stripped == option.strip()),
+                None,
+            )
+            if chosen is not None:
+                quiz_answer_correct = chosen == quiz.correct_index
+                if quiz_answer_correct:
+                    llm_text += (
+                        "\n\n[служебная пометка для наставника: выбранный вариант верен. Раздел засчитан "
+                        "автоматически — кратко подтверди и в этом же ответе переходи к следующему разделу: "
+                        "кратко объясни его суть и задай новый вопрос с вариантами.]"
+                    )
+                else:
+                    llm_text += (
+                        "\n\n[служебная пометка для наставника: выбранный вариант неверен. Одним коротким "
+                        "сообщением объясни ошибку по материалу и повтори ДОСЛОВНО тот же вопрос с теми же вариантами.]"
+                    )
+
         try:
             if wants_test:
                 turn = await ai_training_service.start_testing(
@@ -305,7 +344,7 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
             else:
                 turn = await ai_training_service.generate_turn(
                     draft=web_session.draft,
-                    user_message=payload.text,
+                    user_message=llm_text,
                     is_new_dialogue=False,
                     subject_id=web_session.subject_id,
                     history=history_payload(web_session),
@@ -329,11 +368,20 @@ def create_app(settings: Settings | None = None, llm_gateway: LLMGateway | None 
                 update={"reply": "Извини, не могу ответить в таком тоне. Давай вернёмся к регламенту 🙂"}
             )
 
+        if quiz_answer_correct:
+            titles = sections_state["titles"]
+            covered_count = len(web_session.draft.covered_sections)
+            if covered_count < len(titles):
+                web_session.draft = training_service.mark_section_covered(
+                    web_session.draft, titles[covered_count]
+                )
+
         web_session.draft = training_service.apply_ai_turn(web_session.draft, turn)
         return await _apply_turn(web_session, turn, payload.text)
 
     async def _apply_turn(web_session, turn: TrainingAssistantTurn, user_text: str) -> dict:
         append_history(web_session, user_text, turn.reply)
+        web_session.quiz = turn.quiz
         body = session_payload(web_session)
         body["turn"] = {
             "reply": turn.reply,

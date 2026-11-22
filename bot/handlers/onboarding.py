@@ -297,7 +297,7 @@ async def process_ai_training(
         updated_draft = training_service.apply_ai_turn(updated_draft, ai_turn)
         await state.update_data(
             draft=updated_draft.model_dump(),
-            quiz_options=(ai_turn.quiz.options if ai_turn.quiz else None),
+            quiz=(ai_turn.quiz.model_dump() if ai_turn.quiz else None),
         )
         history.append(ChatMessage(role="user", content=first_message))
         history.append(ChatMessage(role="assistant", content=ai_turn.reply))
@@ -335,7 +335,7 @@ async def handle_quiz_choice(
     """Ответ кликом по варианту вопроса раздела."""
     state_data = await state.get_data()
     draft = TrainingSessionDraft.model_validate(state_data.get("draft", {}))
-    options = state_data.get("quiz_options") or []
+    options = (state_data.get("quiz") or {}).get("options") or []
     index = int((callback.data or "").split(":")[1])
     message = _callback_message(callback)
     if message is None:
@@ -365,18 +365,47 @@ async def _continue_learning(
     subject_id = _subject_id(message)
     history = [ChatMessage.model_validate(item) for item in state_data.get("history", [])]
 
+    # Ответ на вопрос раздела: вердикт считает код (correct_index живёт только в состоянии сервера).
+    quiz_data = state_data.get("quiz")
+    llm_text = user_text
+    quiz_correct = False
+    if quiz_data and draft.phase == "learning":
+        options = quiz_data.get("options") or []
+        chosen = next(
+            (index for index, option in enumerate(options) if user_text.strip() == option.strip()),
+            None,
+        )
+        if chosen is not None:
+            quiz_correct = chosen == quiz_data.get("correct_index")
+            if quiz_correct:
+                llm_text += (
+                    "\n\n[служебная пометка для наставника: выбранный вариант верен. Раздел засчитан "
+                    "автоматически — кратко подтверди и в этом же ответе переходи к следующему разделу: "
+                    "кратко объясни его суть и задай новый вопрос с вариантами.]"
+                )
+            else:
+                llm_text += (
+                    "\n\n[служебная пометка для наставника: выбранный вариант неверен. Одним коротким "
+                    "сообщением объясни ошибку по материалу и повтори ДОСЛОВНО тот же вопрос с теми же вариантами.]"
+                )
+
     try:
         ai_turn = await ai_training_service.generate_turn(
             draft=draft,
-            user_message=user_text,
+            user_message=llm_text,
             is_new_dialogue=False,
             subject_id=subject_id,
             history=history,
         )
+        if quiz_correct:
+            titles = await ai_training_service.section_titles()
+            covered = len(draft.covered_sections)
+            if covered < len(titles):
+                draft = training_service.mark_section_covered(draft, titles[covered])
         updated_draft = training_service.apply_ai_turn(draft, ai_turn)
         await state.update_data(
             draft=updated_draft.model_dump(),
-            quiz_options=(ai_turn.quiz.options if ai_turn.quiz else None),
+            quiz=(ai_turn.quiz.model_dump() if ai_turn.quiz else None),
         )
         history.append(ChatMessage(role="user", content=user_text))
         history.append(ChatMessage(role="assistant", content=ai_turn.reply))

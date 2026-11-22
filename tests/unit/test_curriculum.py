@@ -80,16 +80,22 @@ async def test_empty_curriculum_means_no_gate():
     assert await service.is_curriculum_complete(draft) is True
 
 
-def test_match_section_normalizes_case_and_spaces():
-    matched = AITrainingService._match_section(" чанк 1. смена ", ["ЧАНК 1. Смена", "ЧАНК 2. Упаковка"])
-    assert matched == "ЧАНК 1. Смена"
+def test_sanitize_payload_resets_quiz_with_invalid_correct_index():
+    from services.ai_training_service import AITrainingService
 
+    bad_index = {
+        "reply": "ок",
+        "phase": "learning",
+        "quiz": {"question": "Q?", "options": ["А", "Б"], "correct_index": 5},
+    }
+    assert AITrainingService._sanitize_payload(bad_index)["quiz"] is None
 
-def test_match_section_rejects_unknown_title():
-    assert AITrainingService._match_section("Придуманный раздел", ["ЧАНК 1. Смена"]) is None
-    assert AITrainingService._match_section(None, ["ЧАНК 1. Смена"]) is None
-    assert AITrainingService._match_section("   ", ["ЧАНК 1. Смена"]) is None
+    few_options = {
+        "reply": "ок",
+        "phase": "learning",
+        "quiz": {"question": "Q?", "options": ["А"], "correct_index": 0},
+    }
+    assert AITrainingService._sanitize_payload(few_options)["quiz"] is None
 
-
-def test_match_section_without_route_accepts_any():
-    assert AITrainingService._match_section("Свободная тема", []) == "Свободная тема"
+    good = {"reply": "ок", "phase": "learning", "quiz": {"question": "Q?", "options": ["А", "Б"], "correct_index": 1}}
+    assert AITrainingService._sanitize_payload(good)["quiz"]["correct_index"] == 1

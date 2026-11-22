@@ -103,48 +103,29 @@ def test_learning_turn_does_not_evaluate_answers():
     assert draft.questions_answered == 1
 
 
-def test_apply_ai_turn_collects_completed_section():
-    service = TrainingService()
-    turn = _turn(
-        phase="learning",
-        latest_answer_evaluated=False,
-        answer_is_correct=None,
-        next_question=None,
-        section_completed="ЧАНК 1. Смена",
-    )
-    draft = service.apply_ai_turn(_draft(phase="learning", current_question=None), turn)
-    assert draft.covered_sections == ["ЧАНК 1. Смена"]
-
-
-def test_apply_ai_turn_deduplicates_completed_sections():
-    service = TrainingService()
-    turn = _turn(
-        phase="learning",
-        latest_answer_evaluated=False,
-        answer_is_correct=None,
-        next_question=None,
-        section_completed="ЧАНК 1. Смена",
-    )
-    draft = service.apply_ai_turn(
-        _draft(phase="learning", current_question=None, covered_sections=["ЧАНК 1. Смена"]),
-        turn,
-    )
-    assert draft.covered_sections == ["ЧАНК 1. Смена"]
-
-
 def test_quiz_validates_options_count():
-    quiz = Quiz(question="Куда кладём заморозку?", options=["В термопакет", "В подсобку"])
+    quiz = Quiz(question="Куда кладём заморозку?", options=["В термопакет", "В подсобку"], correct_index=0)
     assert quiz.options == ["В термопакет", "В подсобку"]
+    assert quiz.correct_index == 0
 
     with pytest.raises(ValidationError):
-        Quiz(question="Куда?", options=["Только один вариант"])
+        Quiz(question="Куда?", options=["Только один вариант"], correct_index=0)
 
     turn = _turn(
         phase="learning",
         latest_answer_evaluated=False,
         answer_is_correct=None,
         next_question=None,
-        quiz={"question": "Куда кладём заморозку?", "options": ["В термопакет", "В подсобку"]},
+        quiz={"question": "Куда кладём заморозку?", "options": ["В термопакет", "В подсобку"], "correct_index": 1},
     )
     assert turn.quiz is not None
     assert turn.quiz.question == "Куда кладём заморозку?"
+
+
+def test_mark_section_covered_adds_and_deduplicates():
+    service = TrainingService()
+    draft = _draft(phase="learning")
+    draft = service.mark_section_covered(draft, "Начало смены")
+    assert draft.covered_sections == ["Начало смены"]
+    draft = service.mark_section_covered(draft, "Начало смены")
+    assert draft.covered_sections == ["Начало смены"]
