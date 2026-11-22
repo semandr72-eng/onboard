@@ -434,6 +434,7 @@ function showDone(draft, finalSummary) {
 }
 
 function renderTurn(data) {
+  lastState = data; // обновляем состояние (coverage), иначе прогресс и кнопка теста залипают
   const turn = data.turn;
   // Переход к тесту: чистый экран, без истории обучения.
   const phaseNow = data.draft ? data.draft.phase : null;
