@@ -1,0 +1,10 @@
+target-version = "py311"
+line-length = 120
+
+[lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[lint.per-file-ignores]
+"alembic/versions/*" = ["E501"]
+"services/ai_training_prompts.py" = ["E501"]  # длинные строки — намеренно, это текст промпта
+"services/ai_training_service.py" = ["E501"]  # длинные строки — намеренно, инструкции промпта

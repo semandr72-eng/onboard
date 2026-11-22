@@ -1,0 +1,76 @@
+# On-prem развёртывание: закрытый контур, без внешних API.
+#
+# Всё работает локально сети заказчика:
+#   - LLM: Ollama (DeepSeek-R1-Distill) — OpenAI-совместимый эндпоинт на :11434;
+#     при наличии GPU добавьте разделы deploy.resources (см. README);
+#   - эмбеддинги: локальная модель (fastembed) внутри контейнеров бота/веба,
+#     наружу не уходит ничего;
+#   - БД: Postgres с pgvector.
+#
+# Перед запуском: создайте .env (см. .env.example), задайте ADMIN_API_TOKEN,
+# BOT_TOKEN и LLM_API_KEY (для Ollama достаточно любого непустого значения).
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: onboarding
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d onboarding"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  llm:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  bot:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/onboarding
+      LLM_BASE_URL: http://llm:11434/v1
+      LLM_MODEL: deepseek-r1:8b
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: .
+    command: python -m uvicorn web.app:create_app --factory --host 0.0.0.0 --port 8000
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/onboarding
+      LLM_BASE_URL: http://llm:11434/v1
+      LLM_MODEL: deepseek-r1:8b
+    depends_on:
+      db:
+        condition: service_healthy
+      bot:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  ollama_data:
