@@ -287,19 +287,22 @@ class AITrainingService:
                         "content": (
                             "Ты объяснил раздел, но не заполнил quiz. Сейчас задай один короткий вопрос "
                             "по этому разделу с 2–4 вариантами ответов: заполни quiz.question и quiz.options "
-                            "(верный вариант не помечай). В reply напиши сам вопрос одной строкой."
+                            "(верный вариант не помечай). Текст вопроса в reply не дублируй — оставь reply пустым."
                         ),
                     },
                 ],
                 json_schema=AI_TRAINING_RESPONSE_SCHEMA,
             )
-            repair = TrainingAssistantTurn.model_validate(response.payload)
+            repair_payload = self._sanitize_payload(response.payload)
+            if not repair_payload.get("reply"):
+                repair_payload = {**repair_payload, "reply": turn.reply}
+            repair = TrainingAssistantTurn.model_validate(repair_payload)
         except Exception:
             logger.exception("Quiz repair failed")
             return turn
         if not repair.quiz:
             return turn
-        reply = turn.reply if not repair.reply else f"{turn.reply}\n\n{repair.reply}"
+        reply = turn.reply if repair.reply == turn.reply else f"{turn.reply}\n\n{repair.reply}"
         return turn.model_copy(update={"quiz": repair.quiz, "reply": reply})
 
     async def section_titles(self) -> list[str]:
