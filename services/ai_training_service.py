@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import random
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -66,12 +67,22 @@ class AITrainingService:
             raise RuntimeError(
                 f"Обучение не завершено: пройдено разделов {covered} из {total}. Сначала пройдите все разделы."
             )
-        testing_draft = draft.model_copy(update={"phase": "testing"})
+
+        # План теста: случайный набор разделов (защита от «сфотографировал и передал другу» —
+        # наборы тем у разных сотрудников различаются). Один вопрос — один раздел, без повторов.
+        try:
+            titles = await self.section_titles()
+        except Exception:
+            logger.exception("Failed to resolve section titles for test plan")
+            titles = []
+        plan = random.sample(titles, min(draft.total_questions, len(titles))) if titles else []
+        testing_draft = draft.model_copy(update={"phase": "testing", "test_plan": plan})
+        first_section = f" Первый вопрос — по разделу «{plan[0]}»." if plan else ""
         transition_message = (
             "Я прошёл обучение и нажимаю «Начать тест». Начни тестирование: "
             "phase=testing, в next_question задай первый вопрос по материалу, "
-            "в reply — одна короткая фраза с пожеланием удачи и одним эмодзи (например 🍀), без пересказа материала. "
-            "Все разделы пройдены, поэтому вопросы можешь задавать по любым разделам материала."
+            "в reply — одна короткая фраза с пожеланием удачи и одним эмодзи (например 🍀), без пересказа материала."
+            f"{first_section}"
         )
         turn = await self.generate_turn(
             draft=testing_draft,
@@ -89,6 +100,8 @@ class AITrainingService:
                 history=history,
             )
         turn.phase = "testing"
+        if plan:
+            turn.test_plan = plan
         return turn
 
     async def generate_turn(
@@ -302,7 +315,7 @@ class AITrainingService:
             {"role": message.role, "content": message.content}
             for message in (history or [])
         ]
-        return [
+        messages = [
             {
                 "role": "system",
                 "content": build_training_system_prompt(
@@ -339,3 +352,18 @@ class AITrainingService:
                 ),
             },
         ]
+        if draft.phase == "testing" and draft.test_plan:
+            current_index = min(draft.questions_answered, len(draft.test_plan) - 1)
+            plan_lines = "\n".join(f"{index}. {title}" for index, title in enumerate(draft.test_plan, start=1))
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"План теста (по одному вопросу на раздел, строго по порядку, без повторов):\n"
+                        f"{plan_lines}\n\n"
+                        f"Сейчас задай вопрос по разделу «{draft.test_plan[current_index]}». "
+                        "Вопросы по уже пройденным пунктам плана не повторяй."
+                    ),
+                }
+            )
+        return messages

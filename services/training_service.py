@@ -56,6 +56,9 @@ class TrainingService:
         if ai_turn.final_summary is not None:
             updated.final_summary = ai_turn.final_summary
 
+        if ai_turn.test_plan:
+            updated.test_plan = list(ai_turn.test_plan)
+
         return updated
 
     def mark_section_covered(self, draft: TrainingSessionDraft, title: str) -> TrainingSessionDraft:

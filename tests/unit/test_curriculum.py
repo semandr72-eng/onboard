@@ -69,6 +69,9 @@ async def test_complete_curriculum_allows_testing():
     turn = await service.start_testing(draft)
     assert turn.phase == "testing"
     assert turn.next_question == "Вопрос 1?"
+    # План теста: сервер выбрал разделы из маршрута (по одному на вопрос).
+    assert len(turn.test_plan) == 2
+    assert set(turn.test_plan) == {"ЧАНК 1. Смена", "ЧАНК 2. Упаковка"}
 
 
 async def test_empty_curriculum_means_no_gate():

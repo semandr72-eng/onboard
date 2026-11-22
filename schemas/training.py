@@ -67,6 +67,8 @@ class TrainingSessionDraft(BaseModel):
     evaluated_answers: list[EvaluatedAnswer] = Field(default_factory=list)
     # Названия разделов регламента, пройденных в обучении (маршрут: все разделы -> тест).
     covered_sections: list[str] = Field(default_factory=list)
+    # План теста: разделы, выбранные сервером случайно на старте теста (пусто — свободный режим).
+    test_plan: list[str] = Field(default_factory=list)
 
     @field_validator("employee_name", "current_question", "last_answer_feedback", "final_summary")
     @classmethod
@@ -92,6 +94,8 @@ class TrainingAssistantTurn(BaseModel):
     final_summary: str | None = None
     # Устарело: маршрут ведёт код (кнопка «Понятно»). Поле оставлено для совместимости, не используется.
     section_completed: str | None = None
+    # Заполняется сервисом (не моделью): план теста — разделы для вопросов, выбранные на старте теста.
+    test_plan: list[str] = Field(default_factory=list)
     # Заполняется сервисом (не моделью): к какому чанку базы знаний отнесен оцененный вопрос.
     question_chunk_title: str | None = None
 
