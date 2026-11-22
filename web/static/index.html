@@ -180,8 +180,18 @@
   .composer input { flex: 1; margin-bottom: 0; }
   .composer button { width: 52px; padding: 0; font-size: 18px; border-radius: 14px; flex-shrink: 0; }
 
-  /* Панель вопроса по разделу: варианты ответа кликом + вопрос наставнику */
+  /* Панель вопроса по разделу: вопрос + варианты ответа кликом + вопрос наставнику */
   .quiz-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .quiz-bar .quiz-question {
+    width: 100%;
+    font-weight: 700;
+    font-size: 13.5px;
+    color: #9a3412;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 12px;
+    padding: 10px 14px;
+  }
   .quiz-bar button { width: auto; padding: 10px 14px; font-size: 13.5px; border-radius: 12px; margin-top: 0; }
   .quiz-bar .quiz-ask { border-color: var(--green-500); color: var(--green-700); font-weight: 700; }
 
@@ -291,7 +301,6 @@ const screens = ["invite", "consent", "name", "chat", "done", "declined"];
 const STEP_BY_SCREEN = { invite: "step-invite", consent: "step-consent", name: "step-name", chat: "step-chat", done: "step-test", declined: "step-invite" };
 let lastState = null;
 let prevPhase = null;
-let lastQuizQuestion = null;
 let sending = false;
 
 function updateSteps(activeId) {
@@ -387,18 +396,18 @@ function updateProgress(draft) {
   }
 }
 
-function renderQuiz(quiz, replyText) {
+function renderQuiz(quiz) {
   const bar = document.getElementById("quiz-bar");
   bar.innerHTML = "";
   if (!quiz || !quiz.options || !quiz.options.length) {
     bar.classList.add("hidden");
     return;
   }
-  const replyLower = (replyText || "").toLowerCase();
-  const alreadyShown = quiz.question && replyLower.includes((quiz.question || "").slice(0, 20).toLowerCase());
-  if (quiz.question && quiz.question !== lastQuizQuestion && !alreadyShown) {
-    addMsg("question", "❓ " + quiz.question);
-    lastQuizQuestion = quiz.question;
+  if (quiz.question) {
+    const label = document.createElement("div");
+    label.className = "quiz-question";
+    label.textContent = "❓ " + quiz.question;
+    bar.appendChild(label);
   }
   quiz.options.forEach(option => {
     const btn = document.createElement("button");
@@ -445,7 +454,6 @@ function renderTurn(data) {
   const phaseNow = data.draft ? data.draft.phase : null;
   if (phaseNow === "testing" && prevPhase !== "testing") {
     document.getElementById("chat").innerHTML = "";
-    lastQuizQuestion = null;
   }
   prevPhase = phaseNow;
 
@@ -460,7 +468,7 @@ function renderTurn(data) {
     addMsg("question", "❓ " + turn.next_question);
   }
 
-  renderQuiz(data.draft && data.draft.phase === "learning" ? turn.quiz : null, turn.reply);
+  renderQuiz(data.draft && data.draft.phase === "learning" ? turn.quiz : null);
 
   if (data.state === "completed" || turn.phase === "completed") {
     showDone(data.draft, turn.final_summary);
