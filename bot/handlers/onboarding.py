@@ -118,8 +118,8 @@ async def handle_consent_decline(callback: CallbackQuery, state: FSMContext) -> 
     message = _callback_message(callback)
     if message is not None:
         await message.edit_text(
-            "Без согласия на обработку персональных данных я не смогу провести обучение. "
-            "Если передумаете — отправьте /start."
+            "Без согласия я не смогу провести обучение и сохранить твой результат. "
+            "Передумаешь — отправь /start."
         )
     await callback.answer()
 
